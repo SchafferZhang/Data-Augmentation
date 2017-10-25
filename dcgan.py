@@ -11,6 +11,7 @@ from keras.layers.convolutional import Conv2D, MaxPooling2D
 from keras.layers.core import Flatten
 from keras.optimizers import SGD
 from keras.datasets import mnist
+from keras.preprocessing.image import ImageDataGenerator
 import numpy as np
 import os
 from PIL import Image
@@ -290,18 +291,38 @@ def train_classifier(BATCH_SIZE):
     ind = np.random.permutation(len(y_train))
     X_train = X_train[ind]
     y_train = y_train[ind]
-    y_train = keras.utils.to_categorical(y_train, 2)
+    y_train = keras.utils.to_categorical(y_train, num_classes)
     
     # y_test = keras.utils.to_categorical(y_test, 2)
     X_train = (X_train.astype(np.float32) - 127.5)/128.
     X_train = X_train[:,:,:,np.newaxis]
+    datagen = ImageDataGenerator(featurewise_center=False, 
+                                                            samplewise_center=False, 
+                                                            featurewise_std_normalization=False, 
+                                                            samplewise_std_normalization=False, 
+                                                            zca_whitening=False, 
+                                                            zca_epsilon=1e-6, 
+                                                            rotation_range=30., 
+                                                            width_shift_range=0.1, 
+                                                            height_shift_range=0.1, 
+                                                            shear_range=0., 
+                                                            zoom_range=0., 
+                                                            channel_shift_range=0., 
+                                                            fill_mode='nearest', 
+                                                            cval=0., 
+                                                            horizontal_flip=True, 
+                                                            vertical_flip=False, 
+                                                            rescale=None, 
+                                                            preprocessing_function=None,
+                                                            data_format=None)
 
     X_test = np.concatenate([X_test[y_test==0],X_test[y_test==8]],axis=0)
     y_test = np.concatenate([y_test[y_test==0],y_test[y_test==8]-7],axis=0)
-    y_test = keras.utils.to_categorical(y_test, 2)
+    y_test = keras.utils.to_categorical(y_test, num_classes)
     X_test = (X_test.astype(np.float32) - 127.5)/128.
     X_test = X_test[:,:,:,np.newaxis]
-    history = model.fit(X_train,y_train,batch_size=BATCH_SIZE, epochs=200, verbose=1,validation_data=(X_test,y_test))
+    # history = model.fit(X_train,y_train,batch_size=BATCH_SIZE, epochs=200, verbose=1,validation_data=(X_test,y_test))
+    history = model.fit_generator(datagen.flow(X_train,y_train,batch_size=BATCH_SIZE),steps_per_epoch=len(X_train)/BATCH_SIZE,epochs=300,validation_data=(X_test,y_test))
     plt.plot(history.history['val_acc'])
     plt.title('test accuracy')
     plt.xlabel('epochs')
@@ -315,7 +336,7 @@ def train_classifier(BATCH_SIZE):
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=100)
     parser.add_argument("--nice", dest="nice", action="store_true")
     parser.set_defaults(nice=False)
     args = parser.parse_args()
