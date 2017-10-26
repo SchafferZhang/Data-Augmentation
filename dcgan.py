@@ -11,6 +11,7 @@ from keras.layers.convolutional import Conv2D, MaxPooling2D
 from keras.layers.core import Flatten
 from keras.optimizers import SGD
 from keras.datasets import mnist
+from keras.preprocessing.image import ImageDataGenerator
 import numpy as np
 import os
 from PIL import Image
@@ -102,6 +103,26 @@ def train(BATCH_SIZE):
     print 'The training data size is: ',X_train.shape[0]
     print 'The testing data size is: ',X_test.shape[0]
     # X_train = X_train.reshape((X_train.shape, 1) + X_train.shape[1:])
+    datagen = ImageDataGenerator(featurewise_center=False,
+                                                           samplewise_center=False,
+                                                           featurewise_std_normalization=False,
+                                                           samplewise_std_normalization=False,
+                                                           zca_whitening=False,
+                                                           zca_epsilon=1e-6,
+                                                           rotation_range=30.,
+                                                           width_shift_range=0.1,
+                                                           height_shift_range=0.1,
+                                                           shear_range=0.,
+                                                           zoom_range=0.,
+                                                           channel_shift_range=0.,
+                                                           fill_mode='nearest',
+                                                           cval=0.,
+                                                           horizontal_flip=True,
+                                                           vertical_flip=False,
+                                                           rescale=None,
+                                                           preprocessing_function=None,
+                                                           data_format=None)
+
     d = discriminator_model()
     g = generator_model()
     d_on_g = generator_containing_discriminator(g, d)
@@ -114,27 +135,29 @@ def train(BATCH_SIZE):
     d_list = []
     g_list = []
     accuracy = []
-    for epoch in range(200):
+    for epoch in range(300):
         print("Epoch is", epoch)
         print("Number of batches", int(X_train.shape[0]/BATCH_SIZE))
-        for index in range(int(X_train.shape[0]/BATCH_SIZE)):
+        index = 0
+        for x_batch, y_batch in datagen.flow(X_train, y_train,  batch_size=BATCH_SIZE):
+            index += 1
             noise = np.random.uniform(-1, 1, size=(BATCH_SIZE, 96))
             cat = np.random.choice([2,3], BATCH_SIZE,p=[0.5,0.5])
             cat_one_hot = keras.utils.to_categorical(cat, 4)
             noise = np.concatenate([noise,cat_one_hot],axis=1)
-            image_batch = X_train[index*BATCH_SIZE:(index+1)*BATCH_SIZE]
-            y_batch = y_train[index*BATCH_SIZE:(index+1)*BATCH_SIZE]
+            # image_batch = X_train[index*BATCH_SIZE:(index+1)*BATCH_SIZE]
+            # y_batch = y_train[index*BATCH_SIZE:(index+1)*BATCH_SIZE]
             generated_images = g.predict(noise, verbose=0)
             if index % 50 == 0:
                 image = combine_images(generated_images)
                 image = image*128+127.5
                 Image.fromarray(image.astype(np.uint8)).save(os.path.join('samples',
                     str(epoch)+"_"+str(index)+".png"))
-            X = np.concatenate((image_batch, generated_images))
+            X = np.concatenate((x_batch, generated_images))
             # y = [1] * BATCH_SIZE + [0] * BATCH_SIZE
             y = np.concatenate((y_batch,cat_one_hot),axis=0)
             d_loss = d.train_on_batch(X, y)
-            d_list.append(d_loss[1])
+            d_list.append(d_loss[1]) #measure the performance of the D
             print("batch %d d_loss : %f" % (index, d_loss[0]))
             noise = np.random.uniform(-1, 1, (BATCH_SIZE*2, 96))
             cat = np.random.choice([2,3], BATCH_SIZE*2,p=[0.5,0.5])
@@ -144,9 +167,12 @@ def train(BATCH_SIZE):
 
             d.trainable = False
             g_loss = d_on_g.train_on_batch(noise, y_fake)
-            g_list.append(g_loss[1])
+            g_list.append(g_loss[1]) #measure the performance of the G
             d.trainable = True
             print("batch %d g_loss : %f" % (index, g_loss[0]))
+
+            if index >= len(X_train)/BATCH_SIZE:
+                break
             
         g.save_weights(os.path.join('weights','generator_'+str(epoch)), True)
         d.save_weights(os.path.join('weights','discriminator_'+str(epoch)), True)
@@ -170,32 +196,32 @@ def train(BATCH_SIZE):
         acc = acc/num_batches
         accuracy.append(acc)
         print('====================================================')
-        print('                         The test accuracy is %f'%acc)
+        print('                         The validation accuracy is %f'%acc)
         print('====================================================')
         
     print('================================')
-    print('The index of the highest acc is %d'%(accuracy.index(max(accuracy))))
+    print('The index of the highest acc is at epoch %d, which is %f'%(accuracy.index(max(accuracy)),max(accuracy)))
     print('================================')
 
-    plt.plot(d_list)
-    plt.plot(g_list)
+    plt.plot(d_list[::len(X_train)/BATCH_SIZE])
+    plt.plot(g_list[::len(X_train)/BATCH_SIZE])
     plt.title('model accuracy')
     plt.ylabel('accuracy')
-    plt.xlabel('iterations')
+    plt.xlabel('epoch')
     plt.legend(['discriminator','generator'],loc='upper left')
-    plt.savefig('accuracy.png')
+    plt.savefig(os.path.join('fig','GAN-augmentation','model-accuracy.png'))
     plt.clf()
     plt.plot(accuracy)
-    plt.title('test accuray')
+    plt.title('validation accuray')
     plt.ylabel('accuracy')
-    plt.xlabel('epochs')
-    plt.savefig('classification_accuracy.png')
+    plt.xlabel('epoch')
+    plt.savefig(os.path.join('fig','GAN-augmentation','classification-accuracy.png'))
     plt.clf()
 
 def test(BATCH_SIZE):
     d = discriminator_model()
     d.compile(loss='categorical_crossentropy',optimizer='SGD')
-    d.load_weights(os.path.join('weights','discriminator_162'))
+    d.load_weights(os.path.join('weights','discriminator_277'))
     (X_train, y_train), (X_test, y_test) = mnist.load_data()
     X_test = np.concatenate([X_test[y_test==0],X_test[y_test==8]],axis=0)
     y_test = np.concatenate([y_test[y_test==0],y_test[y_test==8]-7],axis=0)
@@ -221,7 +247,7 @@ def test(BATCH_SIZE):
         # print(acc)
     acc = acc/num_batches
     print('====================================================')
-    print('                         The test accuracy is %f'%acc)
+    print('                         The validation accuracy is %f'%acc)
     print('====================================================')
     return acc
 
@@ -230,14 +256,14 @@ def test(BATCH_SIZE):
 def generate(BATCH_SIZE, nice=False):
     g = generator_model()
     g.compile(loss='categorical_crossentropy', optimizer="SGD")
-    g.load_weights(os.path.join('weights','generator_162'))
+    g.load_weights(os.path.join('weights','generator_277'))
     if nice:
         d = discriminator_model()
         d.compile(loss='categorical_crossentropy', optimizer="SGD")
-        d.load_weights(os.path.join('weights','discriminator_162'))
+        d.load_weights(os.path.join('weights','discriminator_277'))
         noise = np.random.uniform(-1, 1, (BATCH_SIZE*20, 96))
         # cat = np.random.choice([2,3], BATCH_SIZE*20,p=[0.5,0.5])
-        cat = [2]*BATCH_SIZE*20
+        cat = [3]*BATCH_SIZE*20
         cat_one_hot = keras.utils.to_categorical(cat, 4)
         noise = np.concatenate((noise,cat_one_hot),axis=1)
         generated_images = g.predict(noise, verbose=1)
@@ -257,7 +283,7 @@ def generate(BATCH_SIZE, nice=False):
         image = combine_images(nice_images)
     else:
         noise = np.random.uniform(-1, 1, (BATCH_SIZE, 96))
-        cat = [2]*BATCH_SIZE
+        cat = [3]*BATCH_SIZE
         cat_one_hot = keras.utils.to_categorical(cat, 4)
         noise = np.concatenate((noise,cat_one_hot),axis=1)
         generated_images = g.predict(noise, verbose=1)
@@ -303,19 +329,19 @@ def train_classifier(BATCH_SIZE):
     X_test = X_test[:,:,:,np.newaxis]
     history = model.fit(X_train,y_train,batch_size=BATCH_SIZE, epochs=200, verbose=1,validation_data=(X_test,y_test))
     plt.plot(history.history['val_acc'])
-    plt.title('test accuracy')
-    plt.xlabel('epochs')
+    plt.title('validation accuracy')
+    plt.xlabel('epoch')
     plt.ylabel('accuracy')
-    plt.savefig('test_accuracy.png')
+    plt.savefig('validation-accuracy.png')
     plt.clf()
     acc_list = history.history['val_acc']
     print('==================================')
-    print('The highest test accuracy is at epoch %d, which is %f'%(acc_list.index(max(acc_list)),max(acc_list)))
+    print('The highest validation accuracy is at epoch %d, which is %f'%(acc_list.index(max(acc_list)),max(acc_list)))
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=100)
     parser.add_argument("--nice", dest="nice", action="store_true")
     parser.set_defaults(nice=False)
     args = parser.parse_args()
